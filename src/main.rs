@@ -38,8 +38,6 @@ fn main() {
     let alice_keypair = schnorr.new_keypair(alice_sk);
     let alice_pubkey = alice_keypair.public_key();
 
-    println!("Alice's public key: {:?}", alice_pubkey);
-
     let outcomes = vec!["Outcome A", "Outcome B", "Outcome C"];
 
     // Participants compute h_i, T_i, create encrypted signatures, and verify them
@@ -52,11 +50,6 @@ fn main() {
         let pk_o_bytes = pk_o.normalize().to_bytes_uncompressed();
         let outcome_bytes = outcome.as_bytes();
 
-        println!(
-            "Client Hash Inputs for {}: R_i: {:?}, PK_O: {:?}, outcome: {:?}",
-            outcome, r_i_bytes, pk_o_bytes, outcome_bytes
-        );
-
         let h_i = Scalar::from_hash(
             Sha256::default()
                 .chain(r_i_bytes)
@@ -64,7 +57,6 @@ fn main() {
                 .chain(outcome_bytes),
         );
 
-        println!("Client h_i for {}: {:?}", outcome, h_i);
         // Compute T_i = R_i + h_i * PK_O
         let t_i_point = g!(r_i + h_i * pk_o).normalize();
 
@@ -103,11 +95,6 @@ fn main() {
     let pk_o_bytes = pk_o.normalize().to_bytes_uncompressed();
     let outcome_bytes = actual_outcome.as_bytes();
 
-    println!(
-        "Server Hash Inputs: R_i: {:?}, PK_O: {:?}, outcome: {:?}",
-        r_i_bytes, pk_o_bytes, outcome_bytes
-    );
-
     let e = Scalar::from_hash(
         Sha256::default()
             .chain(r_i_bytes)
@@ -115,9 +102,6 @@ fn main() {
             .chain(outcome_bytes),
     );
 
-    println!("Server e: {:?}", e);
-
-    println!("k1: {:?}", k_i);
     let s_oracle = s!(k_i + e * sk_o);
 
     // Oracle publishes (R_i, s_oracle)
