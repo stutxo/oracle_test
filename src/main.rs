@@ -28,7 +28,6 @@ fn main() {
     let k_i = Scalar::random(&mut rand::thread_rng());
 
     // Compute R_i = k_i * G
-    println!("k1: {:?}", k_i);
     let r_i = g!(k_i * G).normalize();
 
     // Oracle publishes PK_O and R_i
@@ -120,8 +119,6 @@ fn main() {
     );
 
     println!("Server e: {:?}", e);
-
-    println!("k1: {:?}", k_i);
     let s_oracle = s!(k_i + e * sk_o);
 
     // Oracle publishes (R_i, s_oracle)
@@ -164,7 +161,6 @@ fn main() {
     {
         Some(decryption_key) => {
             println!("Alice got the decryption key {}", decryption_key)
-            // spend funds here (redeem the lightning invoice)
         }
         None => eprintln!("signature is not the decryption of our original encrypted signature"),
     }
