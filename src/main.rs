@@ -1,13 +1,12 @@
 use std::{collections::HashMap, vec};
 
-use rand::{rngs::ThreadRng, SeedableRng};
+use rand::{rngs::ThreadRng, Rng, SeedableRng};
 use schnorr_fun::{
     adaptor::{Adaptor, EncryptedSign},
     fun::{g, marker::*, nonce, s, Scalar, G},
     Message, Schnorr,
 };
 use sha2::{digest::Update, Sha256};
-use uuid::Uuid;
 
 fn main() {
     //////////////////////////////////////////
@@ -18,9 +17,10 @@ fn main() {
     let nonce_gen = nonce::Synthetic::<Sha256, nonce::GlobalRng<ThreadRng>>::default();
     let schnorr = Schnorr::<Sha256, _>::new(nonce_gen);
 
-    let seed = Uuid::new_v4();
+    // Generate a random u64
+    let seed: u64 = 1616088354130730604;
 
-    let mut rng = rand::rngs::StdRng::seed_from_u64(12345);
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
 
     let sk_o = Scalar::random(&mut rng);
     let oracle_keypair = schnorr.new_keypair(sk_o);
