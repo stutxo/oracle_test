@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use rand::rngs::ThreadRng;
+use rand::{rngs::ThreadRng, SeedableRng};
 use schnorr_fun::{
     adaptor::{Adaptor, EncryptedSign},
     fun::{g, marker::*, nonce, s, Scalar, G},
@@ -17,17 +17,14 @@ fn main() {
     let nonce_gen = nonce::Synthetic::<Sha256, nonce::GlobalRng<ThreadRng>>::default();
     let schnorr = Schnorr::<Sha256, _>::new(nonce_gen);
 
-    // Oracle generates its secret key (sk_O)
-    let sk_o = Scalar::random(&mut rand::thread_rng());
+    let mut rng = rand::rngs::StdRng::seed_from_u64(12345);
 
-    // Oracle's public key (PK_O)
+    let sk_o = Scalar::random(&mut rng);
     let oracle_keypair = schnorr.new_keypair(sk_o);
     let pk_o = oracle_keypair.public_key().normalize();
 
-    // Oracle generates a secret nonce k_i for the outcome
-    let k_i = Scalar::random(&mut rand::thread_rng());
-
-    // Compute R_i = k_i * G
+    // Generate and verify nonce is non-zero
+    let k_i = Scalar::random(&mut rng);
     let r_i = g!(k_i * G).normalize();
 
     // Oracle publishes PK_O and R_i
@@ -119,6 +116,8 @@ fn main() {
     );
 
     println!("Server e: {:?}", e);
+
+    println!("k1: {:?}", k_i);
     let s_oracle = s!(k_i + e * sk_o);
 
     // Oracle publishes (R_i, s_oracle)
