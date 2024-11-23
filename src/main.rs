@@ -7,6 +7,7 @@ use schnorr_fun::{
     Message, Schnorr,
 };
 use sha2::{digest::Update, Sha256};
+use uuid::Uuid;
 
 fn main() {
     //////////////////////////////////////////
@@ -16,6 +17,8 @@ fn main() {
     // Initialize Schnorr context
     let nonce_gen = nonce::Synthetic::<Sha256, nonce::GlobalRng<ThreadRng>>::default();
     let schnorr = Schnorr::<Sha256, _>::new(nonce_gen);
+
+    let seed = Uuid::new_v4();
 
     let mut rng = rand::rngs::StdRng::seed_from_u64(12345);
 
