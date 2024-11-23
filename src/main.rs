@@ -135,7 +135,7 @@ fn main() {
                 let pk_o_bytes = pk_o.normalize().to_bytes_uncompressed();
                 let outcome_bytes = outcome.as_bytes();
 
-                let h_i = Scalar::from_hash(
+                let e = Scalar::from_hash(
                     Sha256::default()
                         .chain(r_i_bytes)
                         .chain(pk_o_bytes)
@@ -145,13 +145,14 @@ fn main() {
                 // Verify the decrypted signature
                 let is_valid = schnorr.verify(&alice_pubkey, message, &decrypted_signature);
                 // During verification
+                println!("\n {}", outcome);
                 println!("Decrypted Signature s: {:?}", decrypted_signature.s);
                 println!("Decrypted Signature R: {:?}", decrypted_signature.R);
-                println!("Computed e during verification: {:?}", h_i);
+                println!("Computed e during verification: {:?}", e);
                 println!("s * G: {:?}", g!(decrypted_signature.s * G).normalize());
                 println!(
                     "R + e * P: {:?}",
-                    g!(decrypted_signature.R + h_i * alice_pubkey).normalize()
+                    g!(decrypted_signature.R + e * alice_pubkey).normalize()
                 );
 
                 assert!(is_valid, "Decrypted signature verification failed");
