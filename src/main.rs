@@ -1,6 +1,6 @@
 use std::{collections::HashMap, vec};
 
-use rand::{rngs::ThreadRng, Rng, SeedableRng};
+use rand::{rngs::ThreadRng, SeedableRng};
 use schnorr_fun::{
     adaptor::{Adaptor, EncryptedSign},
     fun::{g, marker::*, nonce, s, Scalar, G},
