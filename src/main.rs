@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, vec};
 
 use rand::{rngs::ThreadRng, SeedableRng};
 use schnorr_fun::{
@@ -89,62 +89,89 @@ fn main() {
     //////////////////////////////////////////
     // SERVER SIDE OF THE PROTOCOL /////////////
     ///////////////////////////////////////////
-    let actual_outcome = "Outcome B";
 
-    let r_i_bytes = r_i.normalize().to_bytes_uncompressed();
-    let pk_o_bytes = pk_o.normalize().to_bytes_uncompressed();
-    let outcome_bytes = actual_outcome.as_bytes();
+    let mut test_all_outcomes = Vec::new();
+    for outcome in &outcomes {
+        // Participants send the actual outcome to the oracle
+        // Oracle computes e = Hash(R_i || PK_O || actual_outcome)
 
-    let e = Scalar::from_hash(
-        Sha256::default()
-            .chain(r_i_bytes)
-            .chain(pk_o_bytes)
-            .chain(outcome_bytes),
-    );
+        let r_i_bytes = r_i.normalize().to_bytes_uncompressed();
+        let pk_o_bytes = pk_o.normalize().to_bytes_uncompressed();
+        let outcome_bytes = outcome.as_bytes();
 
-    let s_oracle = s!(k_i + e * sk_o);
+        let e = Scalar::from_hash(
+            Sha256::default()
+                .chain(r_i_bytes)
+                .chain(pk_o_bytes)
+                .chain(outcome_bytes),
+        );
 
-    // Oracle publishes (R_i, s_oracle)
-    let s_oracle_non_zero = s_oracle.non_zero().expect("s_oracle should be non-zero");
+        let s_oracle = s!(k_i + e * sk_o);
+
+        // Oracle publishes (R_i, s_oracle)
+        let s_oracle_non_zero = s_oracle.non_zero().expect("s_oracle should be non-zero");
+        test_all_outcomes.push((outcome, s_oracle_non_zero));
+    }
 
     //////////////////////////////////////////
     // USER SIDE OF THE PROTOCOL /////////////
     ///////////////////////////////////////////
 
-    let encryption_key = encryption_keys
-        .get(actual_outcome)
-        .expect("encryption key exists");
-    let encrypted_signature = encrypted_signatures
-        .get(actual_outcome)
-        .expect("encrypted signature exists");
-    let message = Message::<Public>::plain("CET", actual_outcome.as_bytes());
+    for (outcome, encryption_key) in encryption_keys.iter() {
+        for (test_outcome, s_oracle_non_zero) in test_all_outcomes.iter() {
+            if *test_outcome == outcome {
+                let encrypted_signature = encrypted_signatures
+                    .get(outcome)
+                    .expect("encrypted signature exists");
+                let message = Message::<Public>::plain("CET", outcome.as_bytes());
 
-    let decrypted_signature =
-        schnorr.decrypt_signature(s_oracle_non_zero, encrypted_signature.clone());
+                let decrypted_signature =
+                    schnorr.decrypt_signature(*s_oracle_non_zero, encrypted_signature.clone());
 
-    // Verify the decrypted signature
-    let is_valid = schnorr.verify(&alice_pubkey, message, &decrypted_signature);
-    // During verification
-    println!("Decrypted Signature s: {:?}", decrypted_signature.s);
-    println!("Decrypted Signature R: {:?}", decrypted_signature.R);
-    println!("Computed e during verification: {:?}", e);
-    println!("s * G: {:?}", g!(decrypted_signature.s * G).normalize());
-    println!(
-        "R + e * P: {:?}",
-        g!(decrypted_signature.R + e * alice_pubkey).normalize()
-    );
+                let r_i_bytes = r_i.normalize().to_bytes_uncompressed();
+                let pk_o_bytes = pk_o.normalize().to_bytes_uncompressed();
+                let outcome_bytes = outcome.as_bytes();
 
-    assert!(is_valid, "Decrypted signature verification failed");
-    println!(
-        "Decrypted and verified signature for the actual outcome: {}",
-        actual_outcome
-    );
+                let h_i = Scalar::from_hash(
+                    Sha256::default()
+                        .chain(r_i_bytes)
+                        .chain(pk_o_bytes)
+                        .chain(outcome_bytes),
+                );
 
-    match schnorr.recover_decryption_key(encryption_key, encrypted_signature, &decrypted_signature)
-    {
-        Some(decryption_key) => {
-            println!("Alice got the decryption key {}", decryption_key)
+                // Verify the decrypted signature
+                let is_valid = schnorr.verify(&alice_pubkey, message, &decrypted_signature);
+                // During verification
+                println!("Decrypted Signature s: {:?}", decrypted_signature.s);
+                println!("Decrypted Signature R: {:?}", decrypted_signature.R);
+                println!("Computed e during verification: {:?}", h_i);
+                println!("s * G: {:?}", g!(decrypted_signature.s * G).normalize());
+                println!(
+                    "R + e * P: {:?}",
+                    g!(decrypted_signature.R + h_i * alice_pubkey).normalize()
+                );
+
+                assert!(is_valid, "Decrypted signature verification failed");
+                println!(
+                    "Decrypted and verified signature for the actual outcome: {}",
+                    outcome
+                );
+
+                match schnorr.recover_decryption_key(
+                    encryption_key,
+                    encrypted_signature,
+                    &decrypted_signature,
+                ) {
+                    Some(decryption_key) => {
+                        println!("Alice got the decryption key {}", decryption_key)
+                    }
+                    None => {
+                        eprintln!(
+                            "signature is not the decryption of our original encrypted signature"
+                        )
+                    }
+                }
+            }
         }
-        None => eprintln!("signature is not the decryption of our original encrypted signature"),
     }
 }
