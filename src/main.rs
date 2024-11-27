@@ -109,10 +109,9 @@ fn main() {
     //get this from bob
     let bob_sk = Scalar::random(&mut rand::thread_rng());
     let bob_keypair = schnorr.new_keypair(bob_sk);
-    let bob_pubkey = bob_keypair.public_key();
 
     let alice_pubkey_bytes = PublicKey::from_slice(&alice_keypair.public_key().to_bytes()).unwrap();
-    let bob_pubkey_bytes = PublicKey::from_slice(&alice_keypair.public_key().to_bytes()).unwrap();
+    let bob_pubkey_bytes = PublicKey::from_slice(&bob_keypair.public_key().to_bytes()).unwrap();
 
     let taproot_spend_info = create_script(
         alice_pubkey_bytes,
