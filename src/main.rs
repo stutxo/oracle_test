@@ -260,6 +260,8 @@ fn create_script(
 
     let pay_back_players_ctv_hash = calc_ctv_hash(&pay_back_players_outputs);
 
+    let pay_back_players_timeout_ctv_hash = calc_ctv_hash_timeout(&pay_back_players_outputs);
+
     let white_script = dlchess_script_ctv(
         XOnlyPublicKey::from_slice(&oracle_encryption_key_white.serialize()).unwrap(),
         white_win_ctv_hash,
@@ -275,7 +277,7 @@ fn create_script(
         pay_back_players_ctv_hash,
     );
 
-    let timeout_script = dlchess_script_timeout(pay_back_players_ctv_hash);
+    let timeout_script = dlchess_script_timeout_ctv(pay_back_players_timeout_ctv_hash);
 
     let taproot_spend_info = TaprootBuilder::new()
         .add_leaf(2, white_script)
@@ -292,22 +294,19 @@ fn create_script(
     Ok(taproot_spend_info)
 }
 
-fn dlchess_script_ctv(oracle_pubkey: XOnlyPublicKey, ctv_hash: [u8; 32]) -> ScriptBuf {
+fn dlchess_script_ctv(oracle_outcome_pubkey: XOnlyPublicKey, ctv_hash: [u8; 32]) -> ScriptBuf {
     Builder::new()
         .push_slice(ctv_hash)
         .push_opcode(OP_NOP4)
-        .push_x_only_key(&oracle_pubkey)
+        .push_x_only_key(&oracle_outcome_pubkey)
         .push_opcode(OP_CHECKSIG)
         .into_script()
 }
 
-fn dlchess_script_timeout(ctv_hash: [u8; 32]) -> ScriptBuf {
+fn dlchess_script_timeout_ctv(ctv_hash: [u8; 32]) -> ScriptBuf {
     Builder::new()
         .push_slice(ctv_hash)
         .push_opcode(OP_NOP4)
-        .push_int(10)
-        .push_opcode(OP_CSV)
-        .push_opcode(OP_DROP)
         .into_script()
 }
 
@@ -330,6 +329,31 @@ fn calc_ctv_hash(outputs: &[TxOut]) -> [u8; 32] {
     buffer.extend(sha256::Hash::hash(&output_bytes).to_byte_array()); // outputs hash
 
     buffer.extend(0_u32.to_le_bytes()); // inputs index
+
+    let hash = sha256::Hash::hash(&buffer);
+    hash.to_byte_array()
+}
+
+fn calc_ctv_hash_timeout(outputs: &[TxOut]) -> [u8; 32] {
+    let mut buffer = Vec::new();
+    buffer.extend(2_i32.to_le_bytes()); // version
+    buffer.extend(10_i32.to_le_bytes()); // locktime?? not sure if this is how we add locktime
+    buffer.extend(2_u32.to_le_bytes()); // inupts len
+
+    let seq = sha256::Hash::hash(&Sequence(10).0.to_le_bytes()); //10 blocks? not sure if this is how it done
+    buffer.extend(seq.to_byte_array()); // sequences
+
+    let outputs_len = outputs.len() as u32;
+    buffer.extend(outputs_len.to_le_bytes()); // outputs len
+
+    let mut output_bytes: Vec<u8> = Vec::new();
+    for o in outputs {
+        o.consensus_encode(&mut output_bytes).unwrap();
+    }
+    buffer.extend(sha256::Hash::hash(&output_bytes).to_byte_array()); // outputs hash
+
+    buffer.extend(0_u32.to_le_bytes()); // inputs index
+    buffer.extend(1_u32.to_le_bytes()); // inputs index?? not sure if this is how we add both inputs
 
     let hash = sha256::Hash::hash(&buffer);
     hash.to_byte_array()
