@@ -98,8 +98,6 @@ fn main() {
         encrypted_signatures.insert(outcome.to_string(), encrypted_signature);
     }
 
-    let alice_pubkey_bytes = PublicKey::from_slice(&alice_keypair.public_key().to_bytes()).unwrap();
-
     let white_encryption_key = encryption_keys.get("Outcome A").unwrap();
     let black_encryption_key = encryption_keys.get("Outcome B").unwrap();
 
@@ -108,8 +106,17 @@ fn main() {
     let oracle_black_encryption_key =
         XOnlyPublicKey::from_slice(&black_encryption_key.to_xonly_bytes()).unwrap();
 
+    //get this from bob
+    let bob_sk = Scalar::random(&mut rand::thread_rng());
+    let bob_keypair = schnorr.new_keypair(bob_sk);
+    let bob_pubkey = bob_keypair.public_key();
+
+    let alice_pubkey_bytes = PublicKey::from_slice(&alice_keypair.public_key().to_bytes()).unwrap();
+    let bob_pubkey_bytes = PublicKey::from_slice(&alice_keypair.public_key().to_bytes()).unwrap();
+
     let taproot_spend_info = create_script(
         alice_pubkey_bytes,
+        bob_pubkey_bytes,
         oracle_white_encryption_key,
         oracle_black_encryption_key,
     )
@@ -190,17 +197,15 @@ fn main() {
 
 fn create_script(
     white_pub_key: PublicKey,
+    bob_pub_key: PublicKey,
     oracle_encryption_key_white: XOnlyPublicKey,
     oracle_encryption_key_black: XOnlyPublicKey,
 ) -> Result<(TaprootSpendInfo)> {
     println!("🏗️ Creating address for game");
     let secp = Secp256k1::new();
 
-    let combined_pubkey = secp256k1::PublicKey::combine_keys(&[
-        &white_pub_key,
-        // &black_player_keys.public_key(),
-    ])
-    .expect("Failed to combine keys");
+    let combined_pubkey = secp256k1::PublicKey::combine_keys(&[&white_pub_key, &bob_pub_key])
+        .expect("Failed to combine keys");
 
     let white_script = dlchess_script_win(
         XOnlyPublicKey::from_slice(&oracle_encryption_key_white.serialize()).unwrap(),
@@ -209,7 +214,7 @@ fn create_script(
 
     let black_script = dlchess_script_win(
         XOnlyPublicKey::from_slice(&oracle_encryption_key_black.serialize()).unwrap(),
-        white_pub_key.clone().x_only_public_key().0,
+        bob_pub_key.clone().x_only_public_key().0,
     );
 
     let taproot_spend_info = TaprootBuilder::new()
