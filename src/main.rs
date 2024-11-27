@@ -1,5 +1,13 @@
 use std::{collections::HashMap, vec};
 
+use bitcoin::{
+    key::{Keypair, Secp256k1},
+    opcodes::all::{OP_CHECKSIG, OP_CHECKSIGVERIFY},
+    script::Builder,
+    secp256k1::{self, PublicKey},
+    taproot::{TaprootBuilder, TaprootSpendInfo},
+    Address, ScriptBuf, XOnlyPublicKey,
+};
 use rand::{rngs::ThreadRng, SeedableRng};
 use schnorr_fun::{
     adaptor::{Adaptor, EncryptedSign},
@@ -7,6 +15,8 @@ use schnorr_fun::{
     Message, Schnorr,
 };
 use sha2::{digest::Update, Sha256};
+
+use anyhow::Result;
 
 fn main() {
     //////////////////////////////////////////
@@ -22,16 +32,16 @@ fn main() {
 
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
 
-    let sk_o = Scalar::random(&mut rng);
-    let oracle_keypair = schnorr.new_keypair(sk_o);
-    let pk_o = oracle_keypair.public_key().normalize();
+    let oracle_secret_key = Scalar::random(&mut rng);
+    let oracle_keypair = schnorr.new_keypair(oracle_secret_key);
+    let oracle_public_key = oracle_keypair.public_key().normalize();
 
     // Generate and verify nonce is non-zero
-    let k_i = Scalar::random(&mut rng);
-    let r_i = g!(k_i * G).normalize();
+    let nonce_secret: Scalar = Scalar::random(&mut rng);
+    let nonce_public_key = g!(nonce_secret * G).normalize();
 
-    // Oracle publishes PK_O and R_i
-    // Participants receive PK_O and R_i
+    // Oracle publishes PK_O and Nonce
+    // Participants receive PK_O and Nonce
 
     //////////////////////////////////////////
     // USER SIDE OF THE PROTOCOL /////////////
@@ -47,24 +57,23 @@ fn main() {
     let mut encryption_keys = HashMap::new();
     let mut encrypted_signatures = HashMap::new();
 
+    let nonce_bytes = nonce_public_key.normalize().to_bytes_uncompressed();
+    let oracle_public_key_bytes = oracle_public_key.normalize().to_bytes_uncompressed();
+
     for outcome in &outcomes {
         // Participants compute h_i = Hash(R_i || PK_O || s_i)
-        let r_i_bytes = r_i.normalize().to_bytes_uncompressed();
-        let pk_o_bytes = pk_o.normalize().to_bytes_uncompressed();
         let outcome_bytes = outcome.as_bytes();
 
-        let h_i = Scalar::from_hash(
+        let challenge_hash = Scalar::from_hash(
             Sha256::default()
-                .chain(r_i_bytes)
-                .chain(pk_o_bytes)
+                .chain(nonce_bytes)
+                .chain(oracle_public_key_bytes)
                 .chain(outcome_bytes),
         );
 
         // Compute T_i = R_i + h_i * PK_O
-        let t_i_point = g!(r_i + h_i * pk_o).normalize();
-
-        // T_i is used as the encryption key in the adaptor signature
-        let encryption_key = t_i_point
+        let encryption_key = g!(nonce_public_key + challenge_hash * oracle_public_key)
+            .normalize()
             .non_zero()
             .expect("encryption_key should be non-zero");
 
@@ -89,6 +98,26 @@ fn main() {
         encrypted_signatures.insert(outcome.to_string(), encrypted_signature);
     }
 
+    let alice_pubkey_bytes = PublicKey::from_slice(&alice_keypair.public_key().to_bytes()).unwrap();
+
+    let white_encryption_key = encryption_keys.get("Outcome A").unwrap();
+    let black_encryption_key = encryption_keys.get("Outcome B").unwrap();
+
+    let oracle_white_encryption_key =
+        XOnlyPublicKey::from_slice(&white_encryption_key.to_xonly_bytes()).unwrap();
+    let oracle_black_encryption_key =
+        XOnlyPublicKey::from_slice(&black_encryption_key.to_xonly_bytes()).unwrap();
+
+    let taproot_spend_info = create_script(
+        alice_pubkey_bytes,
+        oracle_white_encryption_key,
+        oracle_black_encryption_key,
+    )
+    .unwrap();
+
+    let address = Address::p2tr_tweaked(taproot_spend_info.output_key(), bitcoin::Network::Signet);
+    println!("🔓 address: {:?}", address);
+
     //////////////////////////////////////////
     // SERVER SIDE OF THE PROTOCOL /////////////
     ///////////////////////////////////////////
@@ -98,18 +127,16 @@ fn main() {
         // Participants send the actual outcome to the oracle
         // Oracle computes e = Hash(R_i || PK_O || actual_outcome)
 
-        let r_i_bytes = r_i.normalize().to_bytes_uncompressed();
-        let pk_o_bytes = pk_o.normalize().to_bytes_uncompressed();
-        let outcome_bytes = outcome.as_bytes();
+        let outcome_bytes: &[u8] = outcome.as_bytes();
 
-        let e = Scalar::from_hash(
+        let signature_hash = Scalar::from_hash(
             Sha256::default()
-                .chain(r_i_bytes)
-                .chain(pk_o_bytes)
+                .chain(nonce_bytes)
+                .chain(oracle_public_key_bytes)
                 .chain(outcome_bytes),
         );
 
-        let s_oracle = s!(k_i + e * sk_o);
+        let s_oracle = s!(nonce_secret + signature_hash * oracle_secret_key);
 
         // Oracle publishes (R_i, s_oracle)
         let s_oracle_non_zero = s_oracle.non_zero().expect("s_oracle should be non-zero");
@@ -126,36 +153,17 @@ fn main() {
                 let encrypted_signature = encrypted_signatures
                     .get(outcome)
                     .expect("encrypted signature exists");
+
                 let message = Message::<Public>::plain("CET", outcome.as_bytes());
 
                 let decrypted_signature =
                     schnorr.decrypt_signature(*s_oracle_non_zero, encrypted_signature.clone());
 
-                let r_i_bytes = r_i.normalize().to_bytes_uncompressed();
-                let pk_o_bytes = pk_o.normalize().to_bytes_uncompressed();
-                let outcome_bytes = outcome.as_bytes();
-
-                let e = Scalar::from_hash(
-                    Sha256::default()
-                        .chain(r_i_bytes)
-                        .chain(pk_o_bytes)
-                        .chain(outcome_bytes),
-                );
-
-                // Verify the decrypted signature
                 let is_valid = schnorr.verify(&alice_pubkey, message, &decrypted_signature);
-                // During verification
-                println!("\n {}", outcome);
-                println!("Decrypted Signature s: {:?}", decrypted_signature.s);
-                println!("Decrypted Signature R: {:?}", decrypted_signature.R);
-                println!("Computed e during verification: {:?}", e);
-                println!("s * G: {:?}", g!(decrypted_signature.s * G).normalize());
-                println!(
-                    "R + e * P: {:?}",
-                    g!(decrypted_signature.R + e * alice_pubkey).normalize()
-                );
 
+                println!("\n{}", outcome);
                 assert!(is_valid, "Decrypted signature verification failed");
+                println!("{:?}", decrypted_signature);
                 println!(
                     "Decrypted and verified signature for the actual outcome: {}",
                     outcome
@@ -178,4 +186,48 @@ fn main() {
             }
         }
     }
+}
+
+fn create_script(
+    white_pub_key: PublicKey,
+    oracle_encryption_key_white: XOnlyPublicKey,
+    oracle_encryption_key_black: XOnlyPublicKey,
+) -> Result<(TaprootSpendInfo)> {
+    println!("🏗️ Creating address for game");
+    let secp = Secp256k1::new();
+
+    let combined_pubkey = secp256k1::PublicKey::combine_keys(&[
+        &white_pub_key,
+        // &black_player_keys.public_key(),
+    ])
+    .expect("Failed to combine keys");
+
+    let white_script = dlchess_script_win(
+        XOnlyPublicKey::from_slice(&oracle_encryption_key_white.serialize()).unwrap(),
+        white_pub_key.x_only_public_key().0,
+    );
+
+    let black_script = dlchess_script_win(
+        XOnlyPublicKey::from_slice(&oracle_encryption_key_black.serialize()).unwrap(),
+        white_pub_key.clone().x_only_public_key().0,
+    );
+
+    let taproot_spend_info = TaprootBuilder::new()
+        .add_leaf(1, white_script)
+        .unwrap()
+        .add_leaf(1, black_script)
+        .unwrap()
+        .finalize(&secp, combined_pubkey.into())
+        .unwrap();
+
+    Ok(taproot_spend_info)
+}
+
+fn dlchess_script_win(oracle_pubkey: XOnlyPublicKey, player_pubkey: XOnlyPublicKey) -> ScriptBuf {
+    Builder::new()
+        .push_x_only_key(&oracle_pubkey)
+        .push_opcode(OP_CHECKSIGVERIFY)
+        .push_x_only_key(&player_pubkey)
+        .push_opcode(OP_CHECKSIG)
+        .into_script()
 }
