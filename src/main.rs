@@ -52,11 +52,11 @@ fn main() {
     // USER SIDE OF THE PROTOCOL /////////////
     ///////////////////////////////////////////
 
-    let alice_sk = Scalar::random(&mut rand::thread_rng());
-    let alice_keypair = schnorr.new_keypair(alice_sk);
-    let alice_pubkey = alice_keypair.public_key();
+    let white_player_sk = Scalar::random(&mut rand::thread_rng());
+    let white_player_keypair = schnorr.new_keypair(white_player_sk);
+    let white_player_pubkey = white_player_keypair.public_key();
 
-    let outcomes = vec!["Outcome A", "Outcome B", "Outcome C"];
+    let outcomes = vec!["White", "Black", "Draw"];
 
     // Participants compute h_i, T_i, create encrypted signatures, and verify them
     let mut encryption_keys = HashMap::new();
@@ -88,11 +88,12 @@ fn main() {
         let message = schnorr_fun::Message::<Public>::plain("CET", outcome.as_bytes());
 
         // Generate the encrypted signature (adaptor signature)
-        let encrypted_signature = schnorr.encrypted_sign(&alice_keypair, &encryption_key, message);
+        let encrypted_signature =
+            schnorr.encrypted_sign(&white_player_keypair, &encryption_key, message);
 
         // Verify the encrypted signature
         let is_valid = schnorr.verify_encrypted_signature(
-            &alice_pubkey,
+            &white_player_pubkey,
             &encryption_key,
             message,
             &encrypted_signature,
@@ -103,24 +104,26 @@ fn main() {
         encrypted_signatures.insert(outcome.to_string(), encrypted_signature);
     }
 
-    let white_encryption_key = encryption_keys.get("Outcome A").unwrap();
-    let black_encryption_key = encryption_keys.get("Outcome B").unwrap();
+    let white_encryption_key = encryption_keys.get("White").unwrap();
+    let black_encryption_key = encryption_keys.get("Black").unwrap();
 
     let oracle_white_encryption_key =
         XOnlyPublicKey::from_slice(&white_encryption_key.to_xonly_bytes()).unwrap();
     let oracle_black_encryption_key =
         XOnlyPublicKey::from_slice(&black_encryption_key.to_xonly_bytes()).unwrap();
 
-    //get this from bob
-    let bob_sk = Scalar::random(&mut rand::thread_rng());
-    let bob_keypair = schnorr.new_keypair(bob_sk);
+    //get this from black_player
+    let black_player_sk = Scalar::random(&mut rand::thread_rng());
+    let black_player_keypair = schnorr.new_keypair(black_player_sk);
 
-    let alice_pubkey_bytes = PublicKey::from_slice(&alice_keypair.public_key().to_bytes()).unwrap();
-    let bob_pubkey_bytes = PublicKey::from_slice(&bob_keypair.public_key().to_bytes()).unwrap();
+    let white_player_pubkey_bytes =
+        PublicKey::from_slice(&white_player_keypair.public_key().to_bytes()).unwrap();
+    let black_player_pubkey_bytes =
+        PublicKey::from_slice(&black_player_keypair.public_key().to_bytes()).unwrap();
 
     let taproot_spend_info = create_script(
-        alice_pubkey_bytes,
-        bob_pubkey_bytes,
+        white_player_pubkey_bytes,
+        black_player_pubkey_bytes,
         oracle_white_encryption_key,
         oracle_black_encryption_key,
     )
@@ -170,7 +173,7 @@ fn main() {
                 let decrypted_signature =
                     schnorr.decrypt_signature(*s_oracle_non_zero, encrypted_signature.clone());
 
-                let is_valid = schnorr.verify(&alice_pubkey, message, &decrypted_signature);
+                let is_valid = schnorr.verify(&white_player_pubkey, message, &decrypted_signature);
 
                 println!("\n{}", outcome);
                 assert!(is_valid, "Decrypted signature verification failed");
@@ -186,9 +189,16 @@ fn main() {
                     &decrypted_signature,
                 ) {
                     Some(decryption_key) => {
-                        println!("Alice got the decryption key {}", decryption_key)
+                        println!(
+                            "white_player got the decryption key {} for Outcome {}",
+                            decryption_key, outcome
+                        );
 
-                        // write spend script here
+                        // write spend script here to spend if white player wins
+                        if outcome == "White" {
+                            println!("testing spend script for white win");
+                            create_spending_transaction();
+                        }
                     }
                     None => {
                         eprintln!(
@@ -201,20 +211,33 @@ fn main() {
     }
 }
 
+fn create_spending_transaction() {
+    // spend_win(
+    //     &mut unsigned_tx,
+    //     prev_tx,
+    //     TapSighashType::All,
+    //     taproot_spend_info,
+    //     &white_player_keypair.public_key().0,
+    //     &white_player_keypair,
+    //     Some(decryption_key),
+    // );
+}
+
 fn create_script(
-    white_pub_key: PublicKey,
-    bob_pub_key: PublicKey,
+    white_player_pub_key: PublicKey,
+    black_player_pub_key: PublicKey,
     oracle_encryption_key_white: XOnlyPublicKey,
     oracle_encryption_key_black: XOnlyPublicKey,
 ) -> Result<TaprootSpendInfo> {
     println!("🏗️ Creating address for game");
     let secp = Secp256k1::new();
 
-    let combined_pubkey = secp256k1::PublicKey::combine_keys(&[&white_pub_key, &bob_pub_key])
-        .expect("Failed to combine keys");
+    let combined_pubkey =
+        secp256k1::PublicKey::combine_keys(&[&white_player_pub_key, &black_player_pub_key])
+            .expect("Failed to combine keys");
 
     let ctv_receive_address_white_win = TaprootBuilder::new()
-        .finalize(&secp, white_pub_key.into())
+        .finalize(&secp, white_player_pub_key.into())
         .unwrap();
 
     let ctv_output_address_white_win = Address::p2tr_tweaked(
@@ -231,7 +254,7 @@ fn create_script(
     let white_win_ctv_hash = calc_ctv_hash(&white_win_outputs);
 
     let ctv_receive_address_black_win = TaprootBuilder::new()
-        .finalize(&secp, white_pub_key.into())
+        .finalize(&secp, white_player_pub_key.into())
         .unwrap();
 
     let ctv_output_address_black_win = Address::p2tr_tweaked(
