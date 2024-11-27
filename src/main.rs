@@ -4,7 +4,7 @@ use bitcoin::{
     consensus::Encodable,
     hashes::{sha256, Hash},
     key::{Keypair, Secp256k1},
-    opcodes::all::{OP_CHECKSIG, OP_CHECKSIGVERIFY, OP_NOP4},
+    opcodes::all::{OP_CHECKSIG, OP_CHECKSIGVERIFY, OP_CSV, OP_DROP, OP_NOP4},
     script::Builder,
     secp256k1::{self, Message, PublicKey},
     sighash::{Prevouts, SighashCache},
@@ -247,20 +247,44 @@ fn create_script(
 
     let black_win_ctv_hash = calc_ctv_hash(&black_win_outputs);
 
-    let white_script = dlchess_script_win_ctv(
+    let pay_back_players_outputs = [
+        TxOut {
+            value: Amount::from_sat(50_000 - 1000),
+            script_pubkey: ctv_output_address_white_win.script_pubkey(),
+        },
+        TxOut {
+            value: Amount::from_sat(50_000 - 1000),
+            script_pubkey: ctv_output_address_black_win.script_pubkey(),
+        },
+    ];
+
+    let pay_back_players_ctv_hash = calc_ctv_hash(&pay_back_players_outputs);
+
+    let white_script = dlchess_script_ctv(
         XOnlyPublicKey::from_slice(&oracle_encryption_key_white.serialize()).unwrap(),
         white_win_ctv_hash,
     );
 
-    let black_script = dlchess_script_win_ctv(
+    let black_script = dlchess_script_ctv(
         XOnlyPublicKey::from_slice(&oracle_encryption_key_black.serialize()).unwrap(),
         black_win_ctv_hash,
     );
 
+    let draw_script = dlchess_script_ctv(
+        XOnlyPublicKey::from_slice(&oracle_encryption_key_black.serialize()).unwrap(),
+        pay_back_players_ctv_hash,
+    );
+
+    let timeout_script = dlchess_script_timeout(pay_back_players_ctv_hash);
+
     let taproot_spend_info = TaprootBuilder::new()
-        .add_leaf(1, white_script)
+        .add_leaf(2, white_script)
         .unwrap()
-        .add_leaf(1, black_script)
+        .add_leaf(2, black_script)
+        .unwrap()
+        .add_leaf(2, draw_script)
+        .unwrap()
+        .add_leaf(2, timeout_script)
         .unwrap()
         .finalize(&secp, combined_pubkey.into())
         .unwrap();
@@ -268,21 +292,22 @@ fn create_script(
     Ok(taproot_spend_info)
 }
 
-// fn dlchess_script_win(oracle_pubkey: XOnlyPublicKey, player_pubkey: XOnlyPublicKey) -> ScriptBuf {
-//     Builder::new()
-//         .push_x_only_key(&oracle_pubkey)
-//         .push_opcode(OP_CHECKSIGVERIFY)
-//         .push_x_only_key(&player_pubkey)
-//         .push_opcode(OP_CHECKSIG)
-//         .into_script()
-// }
-
-fn dlchess_script_win_ctv(oracle_pubkey: XOnlyPublicKey, ctv_hash: [u8; 32]) -> ScriptBuf {
+fn dlchess_script_ctv(oracle_pubkey: XOnlyPublicKey, ctv_hash: [u8; 32]) -> ScriptBuf {
     Builder::new()
         .push_slice(ctv_hash)
         .push_opcode(OP_NOP4)
         .push_x_only_key(&oracle_pubkey)
         .push_opcode(OP_CHECKSIG)
+        .into_script()
+}
+
+fn dlchess_script_timeout(ctv_hash: [u8; 32]) -> ScriptBuf {
+    Builder::new()
+        .push_slice(ctv_hash)
+        .push_opcode(OP_NOP4)
+        .push_int(10)
+        .push_opcode(OP_CSV)
+        .push_opcode(OP_DROP)
         .into_script()
 }
 
