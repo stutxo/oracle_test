@@ -167,7 +167,6 @@ fn main() {
 
                 let message = schnorr_fun::Message::<Public>::plain("CET", outcome.as_bytes());
 
-                //do i use this to unlock the oracles script?
                 let decrypted_signature =
                     schnorr.decrypt_signature(*s_oracle_non_zero, encrypted_signature.clone());
 
@@ -181,8 +180,6 @@ fn main() {
                     outcome
                 );
 
-                //test unlocking the script here
-
                 match schnorr.recover_decryption_key(
                     encryption_key,
                     encrypted_signature,
@@ -190,6 +187,8 @@ fn main() {
                 ) {
                     Some(decryption_key) => {
                         println!("Alice got the decryption key {}", decryption_key)
+
+                        // write spend script here
                     }
                     None => {
                         eprintln!(
@@ -225,7 +224,7 @@ fn create_script(
 
     let white_win_outputs = [TxOut {
         //how to do fees?
-        value: Amount::from_sat(100_000),
+        value: Amount::from_sat(100_000 - 1000),
         script_pubkey: ctv_output_address_white_win.script_pubkey(),
     }];
 
@@ -242,7 +241,7 @@ fn create_script(
 
     let black_win_outputs = [TxOut {
         //how to do fees?
-        value: Amount::from_sat(100_000),
+        value: Amount::from_sat(100_000 - 1000),
         script_pubkey: ctv_output_address_black_win.script_pubkey(),
     }];
 
